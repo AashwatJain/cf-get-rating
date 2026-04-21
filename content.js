@@ -107,18 +107,18 @@
     // Build the replacement widget using CF's native HTML structure
     const widget = document.createElement('div');
     widget.className = 'roundbox sidebox';
-    widget.style.cssText = 'padding: 0; border-radius: 0; border: 1px solid #b9b9b9;';
+    widget.style.cssText = 'padding: 0.5em; border-radius: 0;';
 
-    // Caption — matches CF's native caption exactly
+    // Caption — matches CF's "→ Tags" style exactly
     const caption = document.createElement('div');
     caption.className = 'caption titled';
-    caption.style.cssText = 'padding: 4px 8px; background: #f0f0f0; border-bottom: 1px solid #b9b9b9;';
     caption.innerHTML = '→ Get Rating';
     widget.appendChild(caption);
 
     // Inner container
     const inner = document.createElement('div');
-    inner.style.padding = '0.5em';
+    inner.className = 'sidebox-inner';
+    inner.style.padding = '0.5em 0';
 
     // Tag style — matches CF native
     const tagStyle = `
@@ -155,15 +155,15 @@
 
     inner.appendChild(tagsSpan);
 
-    // Buttons container
+    // Buttons container — both buttons side by side, centered
     const btnContainer = document.createElement('div');
-    btnContainer.style.cssText = 'margin-top: 0.4em; text-align: center;';
+    btnContainer.style.cssText = 'margin-top: 0.5em; text-align: center;';
 
     const btnStyle = `
       display: inline-block;
-      padding: 4px 14px;
-      margin: 2px 3px;
-      border: 1px solid #b9b9b9;
+      padding: 4px 16px;
+      margin: 2px 4px;
+      border: 1px solid #888;
       background: #f0f0f0;
       color: #333;
       font-size: 12px;
@@ -182,7 +182,7 @@
       toggleLink.addEventListener('click', (e) => {
         e.preventDefault();
         visible = !visible;
-        tagsSpan.style.display = visible ? 'inline' : 'none';
+        tagsSpan.style.display = visible ? 'block' : 'none';
         toggleLink.textContent = visible ? 'Hide Tags' : 'Show All Tags';
       });
 
