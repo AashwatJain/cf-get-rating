@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="popup.css">
+  <title>CF GetRating</title>
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <div class="header-left">
+        <span class="logo">CF</span>
+        <h1>GetRating</h1>
+      </div>
+      <span class="version">v1.0</span>
+    </header>
+
+    <main class="content">
+      <!-- Loading State -->
+      <div id="loading" class="loading-state">
+        <div class="spinner"></div>
+        <p>Fetching problem data...</p>
+      </div>
+
+      <!-- Error State -->
+      <div id="error" class="error-state hidden">
+        <div class="error-icon">⚠️</div>
+        <p id="error-msg"></p>
+        <p class="error-hint">Make sure you're on a Codeforces problem page.</p>
+      </div>
+
+      <!-- Result State -->
+      <div id="result" class="result-state hidden">
+        <p id="problem-name" class="problem-name"></p>
+
+        <div class="rating-card" id="rating-card">
+          <span class="rating-label">Difficulty</span>
+          <span id="rating-value" class="rating-value"></span>
+        </div>
+
+        <div id="tags-container" class="tags-container collapsed">
+          <div id="tags-list" class="tags-list"></div>
+        </div>
+
+        <div class="actions">
+          <button id="toggle-tags" class="btn btn-tags">
+            <span class="btn-icon">🏷️</span> Show Tags
+          </button>
+          <button id="standings" class="btn btn-standings">
+            <span class="btn-icon">📊</span> Contest Standings
+          </button>
+        </div>
+      </div>
+    </main>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
