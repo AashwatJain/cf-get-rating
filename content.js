@@ -192,6 +192,7 @@
     // "Contest Standings" button
     const standingsLink = document.createElement('a');
     standingsLink.href = `/contest/${contestId}/standings`;
+    standingsLink.target = '_blank';
     standingsLink.style.cssText = btnStyle;
     standingsLink.textContent = 'Contest Standings';
     btnContainer.appendChild(standingsLink);
