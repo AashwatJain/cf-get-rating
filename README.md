@@ -10,6 +10,11 @@ Chrome extension that shows problem rating and tags on Codeforces problem pages.
 
 ## Installation
 
-1. Open `chrome://extensions`
-2. Enable **Developer mode**
-3. Click **Load unpacked** → select this folder
+1. Clone the repository
+   ```bash
+   git clone https://github.com/AashwatJain/cf-get-rating.git
+   ```
+2. Go to `chrome://extensions` in your browser
+3. Turn on **Developer mode** (top-right corner)
+4. Click **Load unpacked** and select the cloned `cf-get-rating` folder
+5. Visit any Codeforces problem page — the extension will work automatically
