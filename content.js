@@ -132,25 +132,37 @@
       cursor: default;
     `;
 
-    // Rating — ALWAYS visible, inline with tags
+    // Rating — ALWAYS visible; show "N/A" if not available (live contest)
+    const ratingTag = document.createElement('span');
+    ratingTag.style.cssText = tagStyle;
     if (problem.rating) {
-      const ratingTag = document.createElement('span');
-      ratingTag.style.cssText = tagStyle;
       ratingTag.textContent = `*${problem.rating}`;
-      inner.appendChild(ratingTag);
+    } else {
+      ratingTag.textContent = '*N/A';
+      ratingTag.title = 'Rating not available yet (live contest)';
+      ratingTag.style.cssText = tagStyle + 'color: #999; font-style: italic;';
     }
+    inner.appendChild(ratingTag);
 
     // Tags — hidden by default, shown inline next to rating
     const tagsSpan = document.createElement('span');
     tagsSpan.style.display = 'none';
 
-    if (problem.tags && problem.tags.length > 0) {
+    const hasTags = problem.tags && problem.tags.length > 0;
+
+    if (hasTags) {
       problem.tags.forEach((tag) => {
         const tagEl = document.createElement('span');
         tagEl.style.cssText = tagStyle;
         tagEl.textContent = tag;
         tagsSpan.appendChild(tagEl);
       });
+    } else {
+      const noTagEl = document.createElement('span');
+      noTagEl.style.cssText = tagStyle + 'color: #999; font-style: italic;';
+      noTagEl.textContent = 'Tags not available';
+      noTagEl.title = 'Tags are hidden during live contests';
+      tagsSpan.appendChild(noTagEl);
     }
 
     inner.appendChild(tagsSpan);
@@ -171,23 +183,21 @@
       cursor: pointer;
     `;
 
-    // "Show All Tags" toggle
-    if (problem.tags && problem.tags.length > 0) {
-      const toggleLink = document.createElement('a');
-      toggleLink.href = 'javascript:void(0)';
-      toggleLink.style.cssText = btnStyle;
-      toggleLink.textContent = 'Show All Tags';
+    // "Show All Tags" toggle — always show the button
+    const toggleLink = document.createElement('a');
+    toggleLink.href = 'javascript:void(0)';
+    toggleLink.style.cssText = btnStyle;
+    toggleLink.textContent = 'Show All Tags';
 
-      let visible = false;
-      toggleLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        visible = !visible;
-        tagsSpan.style.display = visible ? 'block' : 'none';
-        toggleLink.textContent = visible ? 'Hide Tags' : 'Show All Tags';
-      });
+    let visible = false;
+    toggleLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      visible = !visible;
+      tagsSpan.style.display = visible ? 'block' : 'none';
+      toggleLink.textContent = visible ? 'Hide Tags' : 'Show All Tags';
+    });
 
-      btnContainer.appendChild(toggleLink);
-    }
+    btnContainer.appendChild(toggleLink);
 
     // "Contest Standings" button
     const standingsLink = document.createElement('a');
