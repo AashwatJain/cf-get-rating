@@ -4,10 +4,15 @@
      right sidebar with a custom widget
    - Rating is ALWAYS visible in the sidebar
    - UI matches CF's native styling
+   - Requests a rate-limit slot from background
+     before making any API call
+   - Responds to popup messages with cached data
    ============================================= */
 
 (function () {
   'use strict';
+
+  const FETCH_TIMEOUT_MS = 10000;
 
   const url = window.location.href;
   const patterns = [
@@ -28,46 +33,189 @@
 
   if (!contestId || !index) return;
 
-  fetchProblemData(contestId, index)
-    .then((problem) => {
-      if (!problem) return;
-      replaceTagsSection(problem);
-    })
-    .catch((err) => console.error('[CF GetRating]', err));
+  // Store fetched data so popup can request it without extra API calls
+  let cachedProblemData = null;
+  let fetchInProgress = false;
+  let fetchPromise = null;
 
-  /* ── Fetch with fallback ────────────────── */
+  // Listen for messages from popup
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.type === 'GET_PROBLEM_DATA') {
+      if (cachedProblemData) {
+        sendResponse({ success: true, data: cachedProblemData });
+      } else if (fetchInProgress && fetchPromise) {
+        fetchPromise
+          .then((problem) => {
+            sendResponse({
+              success: !!problem,
+              data: problem || null,
+              error: problem ? null : 'Problem not found',
+            });
+          })
+          .catch((err) => {
+            sendResponse({ success: false, error: err.message });
+          });
+      } else {
+        // Trigger a new fetch
+        fetchInProgress = true;
+        fetchPromise = fetchProblemData(contestId, index);
+        fetchPromise
+          .then((problem) => {
+            cachedProblemData = problem;
+            fetchInProgress = false;
+            sendResponse({
+              success: !!problem,
+              data: problem || null,
+              error: problem ? null : 'Problem not found',
+            });
+          })
+          .catch((err) => {
+            fetchInProgress = false;
+            sendResponse({ success: false, error: err.message });
+          });
+      }
+      return true;
+    }
+  });
+
+  // Start initial fetch
+  fetchInProgress = true;
+  fetchPromise = fetchProblemData(contestId, index);
+  fetchPromise
+    .then((problem) => {
+      cachedProblemData = problem;
+      fetchInProgress = false;
+      if (problem) {
+        replaceTagsSection(problem);
+      }
+    })
+    .catch((err) => {
+      fetchInProgress = false;
+      console.error('[CF GetRating]', err);
+    });
+
+  /* ── Request a rate-limit slot from background ── */
+  function requestSlot() {
+    return new Promise((resolve) => {
+      chrome.runtime.sendMessage({ type: 'REQUEST_SLOT' }, (response) => {
+        if (chrome.runtime.lastError) {
+          // Background not available — proceed anyway (best effort)
+          resolve();
+          return;
+        }
+        resolve();
+      });
+    });
+  }
+
+  /* ── Check background cache ─────────────────── */
+  function checkCache(cId, idx) {
+    return new Promise((resolve) => {
+      chrome.runtime.sendMessage(
+        { type: 'CHECK_CACHE', contestId: cId, index: idx },
+        (response) => {
+          if (chrome.runtime.lastError || !response || !response.hit) {
+            resolve(null);
+            return;
+          }
+          resolve(response.data);
+        }
+      );
+    });
+  }
+
+  /* ── Save to background cache ───────────────── */
+  function saveCache(cId, idx, data) {
+    chrome.runtime.sendMessage({
+      type: 'SAVE_CACHE',
+      contestId: cId,
+      index: idx,
+      data,
+    });
+  }
+
+  /* ── Fetch with timeout ────────────────────── */
+  function fetchWithTimeout(fetchUrl, timeoutMs = FETCH_TIMEOUT_MS) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+    return fetch(fetchUrl, { signal: controller.signal })
+      .then((res) => {
+        clearTimeout(timer);
+        return res;
+      })
+      .catch((err) => {
+        clearTimeout(timer);
+        throw err;
+      });
+  }
+
+  /* ── Sleep helper ──────────────────────────── */
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /* ── Fetch with rate-limited slot ──────────── */
   async function fetchProblemData(cId, idx) {
+    // Step 1: Check background cache first (no API call needed)
+    const cached = await checkCache(cId, idx);
+    if (cached) return cached;
+
+    // Step 2: Request a slot (waits for rate limit gap)
+    await requestSlot();
+
+    // Step 3: Try contest.standings (full standings since extra params no longer supported for non-admins)
     try {
-      const res = await fetch(
-        `https://codeforces.com/api/contest.standings?contestId=${cId}&from=1&count=1&showUnofficial=false`
+      const res = await fetchWithTimeout(
+        `https://codeforces.com/api/contest.standings?contestId=${cId}`
       );
       const data = await res.json();
       if (data.status === 'OK') {
         const p = data.result.problems.find(
           (pr) => pr.index.toUpperCase() === idx.toUpperCase()
         );
-        if (p) return p;
+        if (p) {
+          saveCache(cId, idx, p);
+          return p;
+        }
+      } else {
+        console.warn('[CF GetRating] contest.standings:', data.comment || 'Unknown error');
       }
-    } catch (_) {}
+    } catch (err) {
+      console.warn('[CF GetRating] contest.standings error:', err.message);
+    }
 
+    // Step 4: Request another slot for the fallback call
+    await requestSlot();
+
+    // Step 5: Fallback to problemset.problems
     try {
-      const res = await fetch(
-        'https://codeforces.com/api/problemset.problems'
+      const res = await fetchWithTimeout(
+        'https://codeforces.com/api/problemset.problems',
+        FETCH_TIMEOUT_MS + 5000
       );
       const data = await res.json();
       if (data.status === 'OK') {
-        return data.result.problems.find(
+        const found = data.result.problems.find(
           (p) =>
             p.contestId === cId &&
             p.index.toUpperCase() === idx.toUpperCase()
         );
+        if (found) {
+          saveCache(cId, idx, found);
+          return found;
+        }
+      } else {
+        console.warn('[CF GetRating] problemset.problems:', data.comment || 'Unknown error');
       }
-    } catch (_) {}
+    } catch (err) {
+      console.warn('[CF GetRating] problemset.problems error:', err.message);
+    }
 
     return null;
   }
 
-  /* ── Rating color ───────────────────────── */
+  /* ── Rating color ───────────────────────────── */
   function getRatingColor(rating) {
     if (!rating) return '#808080';
     if (rating < 1200) return '#808080';
@@ -79,7 +227,7 @@
     return '#ff0000';
   }
 
-  /* ── Replace native CF tags section ─────── */
+  /* ── Replace native CF tags section ─────────── */
   function replaceTagsSection(problem) {
     const sidebar = document.getElementById('sidebar');
     if (!sidebar) return;

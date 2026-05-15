@@ -1,7 +1,14 @@
 /* =============================================
    CF GetRating — Popup Logic
-   Uses problemset.problems API (public, no auth)
+   Strategy:
+   1. Check chrome.storage.local cache (instant)
+   2. Ask content script for cached data (instant)
+   3. If both miss, ask background to relay to
+      content script (triggers rate-limited fetch)
    ============================================= */
+
+const OVERALL_TIMEOUT_MS = 18000;
+const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
 document.addEventListener('DOMContentLoaded', async () => {
   const loading = document.getElementById('loading');
@@ -20,11 +27,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     result.classList.remove('hidden');
   }
 
+  // Overall timeout safety net
+  const overallTimer = setTimeout(() => {
+    if (!result.classList.contains('hidden') || !errorSection.classList.contains('hidden')) return;
+    showError('Request timed out. Codeforces may be slow — try again in a few seconds.');
+  }, OVERALL_TIMEOUT_MS);
+
   try {
-    // Get current tab URL
+    // Get current tab
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
     if (!tab || !tab.url) {
+      clearTimeout(overallTimer);
       showError('Cannot access current tab.');
       return;
     }
@@ -32,11 +46,35 @@ document.addEventListener('DOMContentLoaded', async () => {
     const parsed = parseCFUrl(tab.url);
 
     if (!parsed) {
+      clearTimeout(overallTimer);
       showError('Not on a Codeforces problem page.');
       return;
     }
 
-    const problem = await fetchProblemData(parsed.contestId, parsed.index);
+    let problem = null;
+
+    // ── Step 1: Check persistent cache ──
+    problem = await getFromStorage(parsed.contestId, parsed.index);
+
+    // ── Step 2: Ask content script ──
+    if (!problem) {
+      problem = await askContentScript(tab.id);
+      if (problem) {
+        saveToStorage(parsed.contestId, parsed.index, problem);
+      }
+    }
+
+    // ── Step 3: Check background cache ──
+    if (!problem) {
+      problem = await checkBackgroundCache(parsed.contestId, parsed.index);
+    }
+
+    clearTimeout(overallTimer);
+
+    if (!problem) {
+      showError('Could not fetch problem data. Codeforces API may be rate-limiting — wait a few seconds and try again.');
+      return;
+    }
 
     showResult();
 
@@ -114,6 +152,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       });
     });
   } catch (err) {
+    clearTimeout(overallTimer);
     showError(err.message || 'An unexpected error occurred.');
   }
 });
@@ -138,51 +177,80 @@ function parseCFUrl(url) {
   return null;
 }
 
-/* ── API Fetcher (uses problemset.problems) ── */
-async function fetchProblemData(contestId, index) {
-  // Try contest.standings first (faster, returns only contest problems)
-  try {
-    const standingsRes = await fetch(
-      `https://codeforces.com/api/contest.standings?contestId=${contestId}&from=1&count=1&showUnofficial=false`
-    );
-    const standingsData = await standingsRes.json();
-
-    if (standingsData.status === 'OK') {
-      const problem = standingsData.result.problems.find(
-        (p) => p.index.toUpperCase() === index.toUpperCase()
+/* ── Ask content script for data ─────────── */
+function askContentScript(tabId) {
+  return new Promise((resolve) => {
+    try {
+      chrome.tabs.sendMessage(
+        tabId,
+        { type: 'GET_PROBLEM_DATA' },
+        (response) => {
+          if (chrome.runtime.lastError) {
+            console.log('[CF GetRating] Content script unavailable:', chrome.runtime.lastError.message);
+            resolve(null);
+            return;
+          }
+          if (response && response.success && response.data) {
+            resolve(response.data);
+          } else {
+            resolve(null);
+          }
+        }
       );
-      if (problem) return problem;
+    } catch (_) {
+      resolve(null);
     }
-  } catch (_) {
-    // Fall through to problemset.problems
-  }
+  });
+}
 
-  // Fallback: use problemset.problems API (public, no auth required)
-  const response = await fetch(
-    'https://codeforces.com/api/problemset.problems'
-  );
+/* ── Check background cache ──────────────── */
+function checkBackgroundCache(contestId, index) {
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendMessage(
+        { type: 'CHECK_CACHE', contestId, index },
+        (response) => {
+          if (chrome.runtime.lastError || !response || !response.hit) {
+            resolve(null);
+            return;
+          }
+          resolve(response.data);
+        }
+      );
+    } catch (_) {
+      resolve(null);
+    }
+  });
+}
 
-  if (!response.ok) {
-    throw new Error('Codeforces API Error.');
-  }
+/* ── Persistent cache (chrome.storage.local) ── */
+function getFromStorage(contestId, index) {
+  return new Promise((resolve) => {
+    const key = `cfgr_${contestId}_${index}`;
+    chrome.storage.local.get(key, (result) => {
+      if (chrome.runtime.lastError) {
+        resolve(null);
+        return;
+      }
+      const entry = result[key];
+      if (!entry || !entry.data) {
+        resolve(null);
+        return;
+      }
+      // Check TTL
+      if (Date.now() - entry.ts > CACHE_TTL_MS) {
+        chrome.storage.local.remove(key);
+        resolve(null);
+        return;
+      }
+      resolve(entry.data);
+    });
+  });
+}
 
-  const data = await response.json();
-
-  if (data.status !== 'OK') {
-    throw new Error(data.comment || 'Codeforces API Error.');
-  }
-
-  const problem = data.result.problems.find(
-    (p) =>
-      p.contestId === contestId &&
-      p.index.toUpperCase() === index.toUpperCase()
-  );
-
-  if (!problem) {
-    throw new Error('Problem not found.');
-  }
-
-  return problem;
+function saveToStorage(contestId, index, data) {
+  const key = `cfgr_${contestId}_${index}`;
+  chrome.storage.local.set({ [key]: { data, ts: Date.now() } });
 }
 
 /* ── Rating Color (matches CF rating tiers) ─ */

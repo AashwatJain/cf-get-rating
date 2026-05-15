@@ -3,8 +3,11 @@
   "name": "CF GetRating",
   "version": "1.0.0",
   "description": "Shows Codeforces problem ratings and tags with one click",
-  "permissions": ["activeTab"],
+  "permissions": ["activeTab", "storage"],
   "host_permissions": ["https://codeforces.com/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
